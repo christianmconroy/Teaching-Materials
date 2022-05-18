@@ -1,0 +1,1381 @@
+---
+title: "Statistical Learning HW 7 - Ch. 8 - Trees and Ensembles"
+author: "Christian Conroy"
+date: "April 18, 2019"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+require(readxl)
+require(ggplot2)
+
+opts_chunk$set(echo = TRUE)
+options(digits = 3)
+
+opts_knit$set(root.dir ="~/GeorgetownMPPMSFS/McCourtMPP/RFiles/NLP Training for Acc")
+```
+
+
+# Module 1: Introduction to Latent Dirichlet Allocation
+## https://www.r-bloggers.com/introduction-to-latent-dirichlet-allocation/
+
+In more detail, LDA represents documents as mixtures of topics that spit out words with certain probabilities. It assumes that documents are produced in the following fashion: when writing each document, you
+
+Decide on the number of words N the document will have (say, according to a Poisson distribution).
+
+Choose a topic mixture for the document (according to a Dirichlet distribution over a fixed set of K topics). For example, assuming that we have the two food and cute animal topics above, you might choose the document to consist of 1/3 food and 2/3 cute animals.
+
+Generate each word w_i in the document by:
+
+First picking a topic (according to the multinomial distribution that you sampled above; for example, you might pick the food topic with 1/3 probability and the cute animals topic with 2/3 probability).
+
+Using the topic to generate the word itself (according to the topic’s multinomial distribution). For example, if we selected the food topic, we might generate the word “broccoli” with 30% probability, “bananas” with 15% probability, and so on.
+
+Assuming this generative model for a collection of documents, LDA then tries to backtrack from the documents to find a set of topics that are likely to have generated the collection.
+
+LDA is a bag of words model
+
+So remember that liek K-means we still have to pick a fixed number of topics K to discover 
+
+# Gibbs Sampling 
+1. Go through each document, and randomly assign each word in the document to one of the K topics.
+
+2. Go through each Word in document d
+  - And for each topic t, compute two things: 1) p(topic t | document d) = the proportion of words in document d that are currently assigned to topic t, and 2) p(word w | topic t) = the proportion of assignments to topic t over all documents that come from this word w
+  - Reassign w a new topic, where we choose topic t with probability p(topic t | document d) * p(word w | topic t) (according to our generative model, this is essentially the probability that topic t generated word w, so it makes sense that we resample the current word’s topic with this probability). 
+  - n other words, in this step, we’re assuming that all topic assignments except for the current word in question are correct, and then updating the assignment of the current word using our model of how documents are generated. [So this part sounds pretty similar to k-means]
+  - After repeating the previous step a large number of times, you’ll eventually reach a roughly steady state where your assignments are pretty good
+    - So use these assignments to estimate the topic mixtures of each document (by counting the proportion of words assigned to each topic within that document) and the words associated to each topic (by counting the proportion of words assigned to each topic overall).
+    
+# Module 2: Natural Language Processing and Topic Modeling
+## https://rpubs.com/chrisbail/nlp_and_topic_models
+
+This Module is all about using the tm and topicmodels packages for LDA
+
+### Installing, Loading, and Initial Exploration
+
+# Install Packages 
+```{r message = FALSE}
+# install.packages('tm')
+library(tm)
+```
+
+Step 2: Load the Data and Take a peek
+
+
+```{r message = FALSE, warning = FALSE}
+
+blog_data<-read.csv("https://raw.githubusercontent.com/nickbadams/D-Lab_TextAnalysisWorkingGroup/master/STM/poliblogs2008.csv", stringsAsFactors = FALSE)
+
+colnames(blog_data)
+
+
+```
+
+So it appears to be a bunch of documents. Let's look at one of them
+
+```{r message = FALSE}
+blog_data$documents[12]
+
+```
+
+There's a few weird characters in there, so looks like we need to do a little encoding 
+
+
+```{r message = FALSE}
+blog_data$documents <- iconv(blog_data$documents, "latin1", "ASCII", sub ="")
+
+# iconv is used to convert character vector between endings. So we're converting from latin1 to ASCII here. 
+```
+
+Create a Corpus
+A corpus is just the dataset version of a collection of texts
+
+```{r message = FALSE, warning= FALSE}
+blog_corpus <- Corpus(VectorSource(as.vector(blog_data$documents)))
+
+# A vector source interprets each element of the vector x as a document.
+# So we're essentially giving each document it's own dataframe here upon which to analyze the words.
+
+```
+
+### Preprocessing Text 
+
+Converting from words to numbers process 
+Step 1: Basic cleaning (lower case, punctuation, white space, stop words, stemming)
+
+```{r message = FALSE, warning= FALSE}
+blog_corpus <- tm_map(blog_corpus, content_transformer(removePunctuation))
+
+# tm_map is the interface to apply transformation functions (also denoted as mappings) to corpora.
+# content_transformer create content transformers, i.e., functions which modify the content of an R object.
+
+```
+
+```{r message = FALSE}
+
+blog_corpus <- tm_map(blog_corpus, content_transformer(tolower)) 
+
+# Not sure why it said we were dropping documents with this when it appears all that we are doing is converting all to lowercase. 
+# content_transformer here appears to essentially be an implicit loop
+
+```
+
+```{r message = FALSE}
+
+blog_corpus <-tm_map(blog_corpus, content_transformer(stripWhitespace))
+
+```
+
+We do the stopwords using a lexicon based approach. (I believe there are packages in r that do this too)
+
+```{r message = FALSE, warning= FALSE}
+
+stoplist <- read.csv("https://raw.githubusercontent.com/evanemolo/Data-Without-Borders-Assignments/master/WK3/english-stopwords.csv", header=TRUE, stringsAsFactors = FALSE)
+stoplist<-stoplist$stopword
+blog_corpus  <- tm_map(blog_corpus , content_transformer(removeWords), stoplist)
+# The tm_map has a built in filtering function here then.
+
+```
+
+Stemming
+
+```{r message = FALSE, warning= FALSE}
+blog_corpus  <- tm_map(blog_corpus , content_transformer(stemDocument), language = "english")
+
+# So the stemDocument is built in
+
+```
+
+
+```{r message = FALSE, warning= FALSE}
+
+Blog_DTM <- DocumentTermMatrix(blog_corpus, control = list(wordLengths = c(2, Inf)))
+
+# Control: There are local options which are evaluated for each document and global options which are evaluated once for the constructed matrix
+
+# Even though stopwords will get rid of most, I think this is saying to get rid of any remaing that are less than 2 letters
+
+```
+
+Let's give the Document Term Matrix a Look (First 20 rows and columns)
+
+```{r message = FALSE, warning= FALSE}
+
+inspect(Blog_DTM[1:20,1:20])
+
+# We have counts of words per document. Surprising that and and as are in here though...
+
+```
+
+Remove Sparse Terms
+
+```{r message = FALSE, warning= FALSE}
+
+DTM <- removeSparseTerms(Blog_DTM, 0.990)
+
+# A term-document matrix where those terms from x are removed which have at least a sparse percentage of empty (i.e., terms occurring 0 times in a document) elements. I.e., the resulting matrix contains only terms with a sparse factor of less than sparse.
+
+# Remember it works in inverse: I've now removed terms that only appear in .01 of all documents.
+
+```
+
+Inspect the Popular Terms
+
+The following line finds all the words that occur more than 3,000 times in the dataset:
+
+```{r message = FALSE, warning= FALSE}
+findFreqTerms(Blog_DTM, 3000)
+
+```
+
+### LDA Analysis 
+
+Now that we've effectively gotten our counts and bags of words, let's actually do the LDA
+
+Assign the number of topics
+
+```{r message = FALSE, warning= FALSE}
+k<-7
+```
+
+Load in the topic models package
+
+```{r message = FALSE, warning= FALSE}
+library(topicmodels)
+```
+
+Setting Control Parameters
+
+This is where it gets a little complicated
+
+```{r message = FALSE, warning= FALSE}
+control_LDA_Gibbs <- list(alpha = 50/k, estimate.beta = T, 
+                          verbose = 0, prefix = tempfile(), 
+                          save = 0, 
+                          keep = 50, 
+                          seed = 980,  # for reproducibility
+                          nstart = 1, best = T,
+                          delta = 0.1,
+                          iter = 2000, 
+                          burnin = 100, 
+                          thin = 2000) 
+
+my_first_topic_model = LDA(Blog_DTM, k, method = "Gibbs", control = control_LDA_Gibbs)
+
+# OK, here's what we have going on here: (System crashed and erased my detailed notes here, so here's what matters)
+# thin, burnin, and iter all deal with Gibbs Iterations. 
+# alpha: Object of class "numeric"; parameter of the Dirichlet distribution for topics over documents
+
+# Careful: this takes a long time to run. 
+
+
+```
+
+Getting the most Popular Terms by Topic
+
+```{r message = FALSE, warning= FALSE}
+
+terms(my_first_topic_model, 30)
+
+```
+
+Determining K (the Number of Topics)
+
+```{r message = FALSE, warning= FALSE}
+library(parallel)
+many_models <- mclapply(seq(2, 35, by = 1), function(x) {LDA(Blog_DTM, x, method = "Gibbs", control = control_LDA_Gibbs)} )
+
+# The mclapply() function essentially parallelizes calls to lapply()
+# The first two arguments to mclapply() are exactly the same as they are for lapply(). However, mclapply() has further arguments (that must be named), the most important of which is the mc.cores argument which you can use to specify the number of processors/cores you want to split the computation across
+
+# This is the part that is similar to kmeans (iterating)
+
+```
+
+```{r message = FALSE, warning= FALSE}
+library(parallel)
+many_models <- mclapply(seq(2, 35, by = 1), function(x) {LDA(Blog_DTM, x, method = "Gibbs", control = control_LDA_Gibbs)} )
+
+# The mclapply() function essentially parallelizes calls to lapply()
+# The first two arguments to mclapply() are exactly the same as they are for lapply(). However, mclapply() has further arguments (that must be named), the most important of which is the mc.cores argument which you can use to specify the number of processors/cores you want to split the computation across
+
+# This is the part that is similar to kmeans (iterating)
+
+# Don't run anytime soon as it takes forever 
+
+```
+
+### Plotting the likelihoods 
+
+```{r message = FALSE, warning= FALSE}
+many_models.logLik <- as.data.frame(as.matrix(lapply(many_models, logLik)))
+
+plot(2:35, unlist(lda.models.gibbs.logLik), xlab="Number of Topics", ylab="Log-Likelihood")
+
+```
+
+Now we do it again with the optimal Ks (Iterating)
+
+```{r message = FALSE, warning= FALSE}
+
+k<-10
+my_first_topic_model <- LDA(Blog_DTM, k, method = "Gibbs", control = control_LDA_Gibbs)
+
+```
+
+Finding the topic assignments 
+```{r message = FALSE, warning= FALSE}
+
+topic_assignments_by_docs <- topics(my_first_topic_model)
+
+```
+
+The second part of this Module is all about using the STM package for structural topic models
+
+Structural topic models are a somewhat recent innovation that enables you to improve identification of latent topics in unstructured text data using meta data that describe different properties of a text (e.g. the year in which it was written).
+
+# Read in texts (after )
+```{r message = FALSE, warning= FALSE}
+install.packages('stm')
+library(stm)
+data <- read.csv("https://raw.githubusercontent.com/nickbadams/D-Lab_TextAnalysisWorkingGroup/master/STM/poliblogs2008.csv")
+processed <- textProcessor(data$documents, metadata = data)
+out <- prepDocuments(processed$documents,processed$vocab,processed$meta)
+docs <- out$documents
+vocab <- out$vocab
+meta <-out$meta
+
+# In this case, it seems that textProcessor is forming the corpus here, but that we have this metadata component that is unique to STM
+
+# The corpus process here automatically does the cleaning. Dope!
+
+# Your corpus now has 13246 documents, 44534 terms and 2257658 tokens.
+
+```
+
+Run the actual model 
+```{r message = FALSE, warning= FALSE}
+
+poliblogPrevFit <- stm(out$documents, out$vocab, K = 20, prevalence =~ rating + s(day), max.em.its = 75, data = out$meta, init.type = "Spectral")
+
+# Make sure to separate documents and vocab when doing this. We choose k topics here. 
+# Metadata covariates for topical prevalence allow the observed metadata to affect the frequency with which a topic is discussed. Covariates in topical content allow the observed metadata to affect the word rate use within a given topic–that is, how a particular topic is discussed
+
+# We have a large dataset, so this is computationally intensive 
+
+```
+
+Searching for K - similar to LDA in TM, we start with a k, but then iterate to get best k it seems
+
+```{r message = FALSE, warning= FALSE}
+
+storage <- searchK(out$documents, out$vocab, K = c(7, 10),
+ prevalence =~ rating + s(day), data = meta)
+
+```
+
+Get top words 
+
+```{r message = FALSE, warning= FALSE}
+
+labelTopics(poliblogPrevFit, c(3, 7, 20))
+
+```
+
+Plot quotes 
+
+```{r message = FALSE, warning= FALSE}
+
+thoughts3 <- findThoughts(poliblogPrevFit, texts = shortdoc, n = 2, topics = 3)$docs[[1]]
+thoughts20 <- findThoughts(poliblogPrevFit, texts = shortdoc, n = 2, topics = 20)$docs[[1]]
+
+```
+
+Plot top words and topic frequency 
+
+Gives us the topics (it seems we decide what the actual topic is. It just clusters for us. It then tells us the top words. )
+
+```{r message = FALSE, warning= FALSE}
+
+plot.STM(poliblogPrevFit, type = "summary", xlim = c(0, .3))
+
+```
+
+# Module 3: NLP in R Topic Modeling 
+## https://www.kaggle.com/rtatman/nlp-in-r-topic-modelling
+
+What will I learn?
+By the time you finish this tutorial, you will have:
+
+Built an unsupervised topic model using Latent Dirichlet Allocation (LDA)
+
+Explored the impact of text pre-processing, including removing stop words and stemming
+
+Built a supervised topic model using term frequency–inverse document frequency (TF-IDF)
+
+Before we can get started on topic modelling, we need to get our environment set up. First, let's load in the packages we're going to use. Here, I've added a comment letting you know why we need each package.
+
+```{r message = FALSE, warning= FALSE}
+
+# read in the libraries we're going to use
+library(tidyverse) # general utility & workflow functions
+library(tidytext) # tidy implimentation of NLP methods
+library(topicmodels) # for LDA topic modelling 
+library(tm) # general text mining functions, making document term matrixes
+library(SnowballC) # for stemming
+
+```
+
+Now let's read in our data. For this tutorial we're going to be using a corpus of hotel reviews put together by Myle Ott and co-authors. It contains positive and negative hotel reviews. Some are real reviews written by actual customers, while others are fake deceptive reviews. For more details, check out this paper on this dataset:
+
+```{r message = FALSE, warning= FALSE}
+
+# read in our data
+reviews <- read_csv("deceptive-opinion.csv")
+
+```
+
+### Unsupervised topic modeling with LDA
+
+What LDA outputs, then, is two estimates:
+
+An estimate of how much each topic contributes to each document
+An estimate of how much each word contributes to each topic
+
+```{r message = FALSE, warning= FALSE}
+
+# read in our data
+reviews <- read_csv("deceptive-opinion.csv")
+
+```
+
+In order to make our lives easier (since we're going to ran an LDA several times) let's write a function that takes a text column from a data frame and returns a plot of the most informative words for a given number of topics.
+
+```{r message = FALSE, warning= FALSE}
+
+# function to get & plot the most informative terms by a specificed number
+# of topics, using LDA
+top_terms_by_topic_LDA <- function(input_text, # should be a columm from a dataframe
+                                   plot = T, # return a plot? TRUE by defult
+                                   number_of_topics = 4) # number of topics (4 by default)
+{    
+    # create a corpus (type of object expected by tm) and document term matrix
+    Corpus <- Corpus(VectorSource(input_text)) # make a corpus object
+    DTM <- DocumentTermMatrix(Corpus) # get the count of words/document
+
+    # remove any empty rows in our document term matrix (if there are any 
+    # we'll get an error when we try to run our LDA)
+    unique_indexes <- unique(DTM$i) # get the index of each unique value
+    DTM <- DTM[unique_indexes,] # get a subset of only those indexes
+    
+    # preform LDA & get the words/topic in a tidy text format
+    lda <- LDA(DTM, k = number_of_topics, control = list(seed = 1234))
+    topics <- tidy(lda, matrix = "beta")
+
+    # get the top ten terms for each topic
+    top_terms <- topics  %>% # take the topics data frame and..
+      group_by(topic) %>% # treat each topic as a different group
+      top_n(10, beta) %>% # get the top 10 most informative words
+      ungroup() %>% # ungroup
+      arrange(topic, -beta) # arrange words in descending informativeness
+
+    # if the user asks for a plot (TRUE by default)
+    if(plot == T){
+        # plot the top ten terms for each topic in order
+        top_terms %>% # take the top terms
+          mutate(term = reorder(term, beta)) %>% # sort terms by beta value 
+          ggplot(aes(term, beta, fill = factor(topic))) + # plot beta by theme
+          geom_col(show.legend = FALSE) + # as a bar plot
+          facet_wrap(~ topic, scales = "free") + # which each topic in a seperate plot
+          labs(x = NULL, y = "Beta") + # no x label, change y label 
+          coord_flip() # turn bars sideways
+    }else{ 
+        # if the user does not request a plot
+        # return a list of sorted terms instead
+        return(top_terms)
+    }
+}
+
+```
+
+But how do we know how many topics we should have? You can't be sure ahead of time unless you're very familiar with the dataset and know how many topics you expect to see. Probably the most common way to figure out how many topics there are automatically is to train a lot of different models with different numbers of topics and then see which has the least uncertainty (generally measured by perplexity)
+
+If we have perplexity as a measure, I imagine we can use some kind of cross-validation?
+
+Since I know that this dataset contains deceptive and truthful reviews, I'm going to specify that I want to know about two topics.
+
+1. Loading in and Converting to Corpus
+
+```{r message = FALSE, warning= FALSE}
+
+# plot top ten terms in the hotel reviews by topic
+top_terms_by_topic_LDA(reviews$text, number_of_topics = 2)
+
+# We didn't take out stop words here,, so naturally this is what we get. 
+```
+
+# Module 4: A gentle introduction to topic modeling using R
+## https://eight2late.wordpress.com/2015/09/29/a-gentle-introduction-to-topic-modeling-using-r/
+
+In essence, LDA is a technique that facilitates the automatic discovery of themes in a collection of documents.
+
+The aim is to infer the latent topic structure given the words and document.  LDA does this by recreating the documents in the corpus by adjusting the relative importance of topics in documents and words in topics iteratively.
+
+As in my previous articles on text mining, I will use a collection of 30 posts from this blog as an example corpus.
+
+```{r message = FALSE, warning= FALSE}
+# Load library 
+library(tm)
+# Set wd to load in files 
+setwd("~/GeorgetownMPPMSFS/McCourtMPP/RFiles/NLP Training for Acc/Textmining")
+# Load files into corpus 
+#get listing of .txt files in directory
+filenames <- list.files(getwd(),pattern='*.txt')
+#read files into a character vector (Really useful in the process of going from doc to corpus transition)
+files <- lapply(filenames,readLines)
+#create corpus from vector
+docs <- Corpus(VectorSource(files))
+
+```
+
+```{r message = FALSE, warning= FALSE}
+#inspect a particular document in corpus
+writeLines(as.character(docs[[30]]))
+
+```
+
+2. Preprocessing 
+
+```{r message = FALSE, warning= FALSE}
+# To lowercase
+docs <-tm_map(docs,content_transformer(tolower))
+```
+
+```{r message = FALSE, warning= FALSE}
+#remove potentially problematic symbols
+toSpace <- content_transformer(function(x, pattern) { return (gsub(pattern, ' ' , x))})
+docs <- tm_map(docs, toSpace, '–')
+docs <- tm_map(docs, toSpace, '’')
+docs <- tm_map(docs, toSpace, '‘')
+docs <- tm_map(docs, toSpace, '•')
+docs <- tm_map(docs, toSpace, '”')
+docs <- tm_map(docs, toSpace, '“')
+```
+
+```{r message = FALSE, warning= FALSE}
+#remove punctuation
+docs <- tm_map(docs, removePunctuation)
+#Strip digits
+docs <- tm_map(docs, removeNumbers)
+#remove stopwords
+docs <- tm_map(docs, removeWords, stopwords('english'))
+#remove whitespace
+docs <- tm_map(docs, stripWhitespace)
+#Good practice to check every now and then
+writeLines(as.character(docs[[30]]))
+#Stem document
+docs <- tm_map(docs,stemDocument)
+
+# Nice that is has all of these built in functions for preprocessing!
+```
+
+```{r message = FALSE, warning= FALSE}
+#fix up 1) differences between us and aussie english 2) general errors
+docs <- tm_map(docs, content_transformer(gsub),
+pattern = 'organiz', replacement = 'organ')
+docs <- tm_map(docs, content_transformer(gsub),
+pattern = 'organis', replacement = 'organ')
+docs <- tm_map(docs, content_transformer(gsub),
+pattern = 'andgovern', replacement = 'govern')
+docs <- tm_map(docs, content_transformer(gsub),
+pattern = 'inenterpris', replacement = 'enterpris')
+docs <- tm_map(docs, content_transformer(gsub),
+pattern = 'team-', replacement = 'team')
+#define and eliminate all custom stopwords
+myStopwords <- c('can', 'say','one','way','use',
+'also','howev','tell','will',
+'much','need','take','tend','even',
+'like','particular','rather','said',
+'get','well','make','ask','come','end',
+'first','two','help','often','may',
+'might','see','someth','thing','point',
+'post','look','right','now','think','‘ve ',
+'‘re ','anoth','put','set','new','good',
+'want','sure','kind','larg','yes,','day','etc',
+'quit','sinc','attempt','lack','seen','awar',
+'littl','ever','moreov','though','found','abl',
+'enough','far','earli','away','achiev','draw',
+'last','never','brief','bit','entir','brief','great','lot')
+docs <- tm_map(docs, removeWords, myStopwords)
+#inspect a document as a check
+writeLines(as.character(docs[[30]]))
+
+# Really annoying to define all of these stopwords manually. I blame the Australians. 
+```
+
+Create the document-term matrix 
+
+```{r message = FALSE, warning= FALSE}
+#Create document-term matrix
+dtm <- DocumentTermMatrix(docs)
+#convert rownames to filenames
+rownames(dtm) <- filenames
+#collapse matrix by summing over columns
+freq <- colSums(as.matrix(dtm))
+#length should be total number of terms
+length(freq)
+#create sort order (descending)
+ord <- order(freq,decreasing=TRUE)
+#List all terms in decreasing order of freq and write to disk
+freq[ord]
+write.csv(freq[ord],'word_freq.csv')
+```
+
+The Actual LDA Analysis 
+
+For the most part, we’ll use the default parameter values supplied by the LDA function,custom setting only the parameters that are required by the Gibbs sampling algorithm.
+
+Gibbs sampling works by performing a random walk in such a way that reflects the characteristics of a desired distribution.
+
+Parameters:
+
+Burn-in Period: Because the starting point of the walk is chosen at random, it is necessary to discard the first few steps of the walk (as these do not correctly reflect the properties of distribution). This is referred to as the burn-in period. We set the burn-in parameter to 4000. 
+
+Iter: Following the burn-in period, we perform 2000 iterations, 
+
+Thin: taking every 500th  iteration for further use. The reason we do this is to avoid correlations between samples.
+
+nstart: We use 5 different starting points (nstart=5) – that is, five independent runs.
+
+Seed: Each starting point requires a seed integer (this also ensures reproducibility),  so I have provided 5 random integers in my seed list. This is why we have to do it in list form. 
+
+Best: Finally I’ve set best to TRUE (actually a default setting), which instructs the algorithm to return results of the run with the highest posterior probability.
+
+k: As mentioned earlier,  there is an important parameter that must be specified upfront: k, the number of topics that the algorithm should use to classify documents. 
+
+The upshot of this is that it is best to do lots of runs with different settings of parameters to check the stability of your results. 
+
+The bottom line is that our interest is purely practical so it is good enough if the results make sense. 
+
+Loading in topicmodels package and setting parameters
+
+```{r message = FALSE, warning= FALSE}
+#load topic models library
+library(topicmodels)
+
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 5
+```
+
+That done, we can now do the actual work – run the topic modelling algorithm on our corpus. Here is the code:
+
+```{r message = FALSE, warning= FALSE}
+#load topic models library
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm,k, method='Gibbs', control=list(nstart=nstart, seed = seed, best=best, burnin = burnin, iter = iter, thin=thin))
+```
+
+```{r message = FALSE, warning= FALSE}
+#write out results
+#docs to topics
+ldaOut.topics <- as.matrix(topics(ldaOut))
+write.csv(ldaOut.topics,file=paste('LDAGibbs',k,'DocsToTopics.csv'))
+```
+
+```{r message = FALSE, warning= FALSE}
+#top 6 terms in each topic
+ldaOut.terms <- as.matrix(terms(ldaOut,6))
+write.csv(ldaOut.terms,file=paste('LDAGibbs',k,'TopicsToTerms.csv'))
+```
+
+```{r message = FALSE, warning= FALSE}
+#probabilities associated with each topic assignment
+topicProbabilities <- as.data.frame(ldaOut@gamma)
+write.csv(topicProbabilities,file=paste('LDAGibbs',k,'TopicProbabilities.csv'))
+```
+
+```{r message = FALSE, warning= FALSE}
+#Find relative importance of top 2 topics
+topic1ToTopic2 <- lapply(1:nrow(dtm),function(x)
+sort(topicProbabilities[x,])[k]/sort(topicProbabilities[x,])[k-1])
+```
+
+```{r message = FALSE, warning= FALSE}
+#Find relative importance of second and third most important topics
+topic2ToTopic3 <- lapply(1:nrow(dtm),function(x)
+sort(topicProbabilities[x,])[k-1]/sort(topicProbabilities[x,])[k-2])
+
+#write to file
+write.csv(topic1ToTopic2,file=paste('LDAGibbs',k,'Topic1ToTopic2.csv'))
+write.csv(topic2ToTopic3,file=paste('LDAGibbs',k,'Topic2ToTopic3.csv'))
+
+```
+
+Of particular interest to us are the document to topic assignments, the top terms in each topic and the probabilities associated with each of those terms. These are printed out in the first three calls to write.csv above
+
+The last file lists the probabilities with  which each topic is assigned to a document. This is therefore a 30 x 5 matrix – 30 docs and 5 topics. As one might expect, the highest probability in each row corresponds to the topic assigned to that document.  The “goodness” of the primary assignment (as discussed in point 1) can be assessed by taking the ratio of the highest to second-highest probability and the second-highest to the third-highest probability and so on. This is what I’ve done in the last nine lines of the code above.
+
+# Module 5: Topic Modeling in R
+## https://knowledger.rbind.io/post/topic-modeling-using-r/
+
+In machine learning and natural language processing topic models are generative models which provide a probabilistic framework for the term frequency occurrences in documents in a given corpus. 
+
+I don't use his exact code here because the jackass didn't include his cleaning code. 
+
+A common way to reduce the number of terms is to use the term frequency inverse document frequecy (tf-idf), a numerical statistic that is intended to reflect how important a word is to a document in a collection or corpus. The tf-idf value increases proportionally to the number of times a word appears in the document, but is offset by the frequency of the word in the corpus, which helps to adjust for the fact that some words appear more frequently in general. I will use it as a weighting factor to trim the number of terms I will use in the model.
+
+```{r message = FALSE, warning= FALSE}
+term_tfidf <- tapply(llistopic.dtm$v/slam::row_sums(llistopic.dtm)[llistopic.dtm$i], llistopic.dtm$j, mean) *
+  log2(tm::nDocs(llistopic.dtm)/slam::col_sums(llistopic.dtm > 0))
+summary(term_tfidf)
+
+# Look back at this is streamlined way to do TFIDF. Also have code from Jeff's class. 
+```
+
+```{r message = FALSE, warning= FALSE}
+term_tfidf <- tapply(llistopic.dtm$v/slam::row_sums(llistopic.dtm)[llistopic.dtm$i], llistopic.dtm$j, mean) *
+  log2(tm::nDocs(llistopic.dtm)/slam::col_sums(llistopic.dtm > 0))
+summary(term_tfidf)
+
+# Look back at this is streamlined way to do TFIDF. Also have code from Jeff's class. 
+```
+
+```{r message = FALSE, warning= FALSE}
+## Keeping the rows with tfidf >= to the 0.155
+llisreduced.dtm <- llistopic.dtm[,term_tfidf >= 0.155]
+summary(slam::col_sums(llisreduced.dtm))
+```
+
+Determine k number of topics
+A lot of the following work is based on Martin Ponweiser’s thesis, Latent Dirichlet Allocation in R. One aspect of LDA, is you need to know the k number of optimal topics for the documents. From Martins work, I am using a harmonic mean method to determine k, as shown in section 4.3.3, Selection by Harmonic Mean.
+
+The harmonic mean function:
+
+```{r message = FALSE, warning= FALSE}
+harmonicMean <- function(logLikelihoods, precision = 2000L) {
+  llMed <- median(logLikelihoods)
+  as.double(llMed - log(mean(exp(-mpfr(logLikelihoods,
+                                       prec = precision) + llMed))))
+}
+```
+
+First, an example of finding the harmonic mean for one value of k, using a burn in of 1000 and iterating 1000 times. `Keep’ indicates that every keep iteration the log-likelihood is evaluated and stored. The log-likelihood values are then determined by first fitting the model. This returns all log-likelihood values including burn-in, i.e., these need to be omitted before calculating the harmonic mean:
+
+```{r message = FALSE, warning= FALSE}
+k <- 25
+burnin <- 1000
+iter <- 1000
+keep <- 50
+fitted <- topicmodels::LDA(llisreduced.dtm, k = k, method = "Gibbs",control = list(burnin = burnin, iter = iter, keep = keep) )
+## assuming that burnin is a multiple of keep
+logLiks <- fitted@logLiks[-c(1:(burnin/keep))]
+
+## This returns the harmomnic mean for k = 25 topics.
+harmonicMean(logLiks)
+```
+
+To find the best value for k for our corpus, we do this over a sequence of topic models with different vales for k. This will generate numerous topic models with different numbers of topics, creating a vector to hold the k values. We will use a sequence of numbers from 2 to 100, stepped by one. Using the lapply function, we run the LDA function using all the values of k. To see how much time is needed to run the process on your system, use the system.time function. I ran this on a 2.9 GHz MAC, running 10.10.3 with 32 GB of ram.
+
+(So this would be a bitch from a computational time standpoint)
+
+```{r message = FALSE, warning= FALSE}
+seqk <- seq(2, 100, 1)
+burnin <- 1000
+iter <- 1000
+keep <- 50
+system.time(fitted_many <- lapply(seqk, function(k) topicmodels::LDA(llisreduced.dtm, k = k,
+                                                     method = "Gibbs",control = list(burnin = burnin,
+                                                                         iter = iter, keep = keep) )))
+```
+
+```{r message = FALSE, warning= FALSE}
+# extract logliks from each topic
+logLiks_many <- lapply(fitted_many, function(L)  L@logLiks[-c(1:(burnin/keep))])
+
+# compute harmonic means
+hm_many <- sapply(logLiks_many, function(h) harmonicMean(h))
+```
+
+Now that is have calculated the harmonic means of the models for 2 - 100 topics, you can plot the results using ggplot2 package.
+
+```{r message = FALSE, warning= FALSE}
+ldaplot <- ggplot(data.frame(seqk, hm_many), aes(x=seqk, y=hm_many)) + geom_path(lwd=1.5) +
+  theme(text = element_text(family= NULL),
+        axis.title.y=element_text(vjust=1, size=16),
+        axis.title.x=element_text(vjust=-.5, size=16),
+        axis.text=element_text(size=16),
+        plot.title=element_text(size=20)) +
+  xlab('Number of Topics') +
+  ylab('Harmonic Mean') +
+     annotate("text", x = 25, y = -80000, label = paste("The optimal number of topics is", seqk[which.max(hm_many)])) +
+  ggtitle(expression(atop("Latent Dirichlet Allocation Analysis of NEN LLIS", atop(italic("How many distinct topics in the abstracts?"), ""))))
+ldaplot
+```
+
+What you're looking for in the plot is the turning point downwards as the shape will be like an inverted hockey stick typically
+
+If you just want to know the optimal number of topics:
+
+```{r message = FALSE, warning= FALSE}
+seqk[which.max(hm_many)]
+```
+
+Time to run the Model
+
+To run the model, I am using the LDA function in the topicmodels package. You pass the document term matrix, optimal number of topics, the estimation method, how many iterations to do and a seed number if you want to be able to replicate the results.
+
+```{r message = FALSE, warning= FALSE}
+system.time(llis.model <- topicmodels::LDA(llisreduced.dtm, 27, method = "Gibbs", control = list(iter=2000, seed = 0622)))
+
+# THESE MODELS HAVE BEEN REALLY LONG SO ALWAYS DO THIS SYSTEM.TIME FUNCTION!
+```
+
+Explore the model
+
+The topics function from the package is used to extract the most likely topic for each document and the terms function to extract the terms per topic. The terms are listed in rank order, with the most frequent term in the topic listed first. The most diagnostic topic for each document is added to the llis data frame. 
+
+```{r message = FALSE, warning= FALSE}
+llis.topics <- topicmodels::topics(llis.model, 1)
+## In this case I am returning the top 30 terms.
+llis.terms <- as.data.frame(topicmodels::terms(llis.model, 30), stringsAsFactors = FALSE)
+llis.terms[1:5]
+```
+
+```{r message = FALSE, warning= FALSE}
+# Creates a dataframe to store the Lesson Number and the most likely topic
+doctopics.df <- as.data.frame(llis.topics)
+doctopics.df <- dplyr::transmute(doctopics.df, LessonId = rownames(doctopics.df), Topic = llis.topics)
+doctopics.df$LessonId <- as.integer(doctopics.df$LessonId)
+
+## Adds topic number to original dataframe of lessons
+llis.display <- dplyr::inner_join(llis.display, doctopics.df, by = "LessonId")
+```
+
+Working With Theta
+One of the posterior items generated by the model is the per document probabilities of the topics. You extract theta using the posterior function from the topicmodels package. The result displayed is the theta for Topic 1 -5 of the first 6 documents.
+
+```{r message = FALSE, warning= FALSE}
+theta <- as.data.frame(topicmodels::posterior(llis.model)$topics)
+head(theta[1:5])
+```
+
+We can correlate the topic by the metadata available, here will will use the predefined category of the documents. I construct a dataframe binding the Document Number, theta for the document, and its associated category. The column means of theta, grouped by category is calculated.
+
+```{r message = FALSE, warning= FALSE}
+x <- as.data.frame(row.names(theta), stringsAsFactors = FALSE)
+colnames(x) <- c("LessonId")
+x$LessonId <- as.numeric(x$LessonId)
+theta2 <- cbind(x, theta)
+theta2 <- dplyr::left_join(theta2, FirstCategorybyLesson, by = "LessonId")
+## Returns column means grouped by catergory
+theta.mean.by <- by(theta2[, 2:28], theta2$Category, colMeans)
+theta.mean <- do.call("rbind", theta.mean.by)
+```
+
+I can now correlate the topics
+
+```{r message = FALSE, warning= FALSE}
+library(corrplot)
+c <- cor(theta.mean)
+corrplot(c, method = "circle")
+```
+
+Using the categories mean theta, it is possible to select the most diagnostic topic for each of the categories.
+
+```{r message = FALSE, warning= FALSE}
+theta.mean.ratios <- theta.mean
+for (ii in 1:nrow(theta.mean)) {
+  for (jj in 1:ncol(theta.mean)) {
+    theta.mean.ratios[ii,jj] <-
+      theta.mean[ii,jj] / sum(theta.mean[ii,-jj])
+  }
+}
+topics.by.ratio <- apply(theta.mean.ratios, 1, function(x) sort(x, decreasing = TRUE, index.return = TRUE)$ix)
+
+# The most diagnostic topics per category are found in the theta 1st row of the index matrix:
+topics.most.diagnostic <- topics.by.ratio[1,]
+head(topics.most.diagnostic)
+```
+
+The LDAvis package provides an excellent way to visualize the topics and terms associated with them. Look here for further info: http://www.r-bloggers.com/a-link-between-topicmodels-lda-and-ldavis/
+
+# Module 6: Beginner’s Guide to LDA Topic Modelling with R
+## https://towardsdatascience.com/beginners-guide-to-lda-topic-modelling-with-r-e57a5a8e7a25
+
+This article aims to give readers a step-by-step guide on how to do topic modelling using Latent Dirichlet Allocation (LDA) analysis with R.
+
+It is made up of 4 parts: loading of data, pre-processing of data, building the model and visualisation of the words in a topic.
+
+1. Loading of data
+The dataset we will be using for simplicity purpose will be the first 5000 rows of twitter sentiments data from kaggle. For our model, we do not need to have labelled data. All we need is a text column that we want to create topics from and a set of unique id. There was initially 18 columns and 13000 rows of data, but we will just be using the text and id columns.
+
+```{r message = FALSE, warning= FALSE}
+library(data.table)
+data <- fread('Sentiment.csv')
+# `fread` is for regular delimited files; i.e., where every row has the same number of columns.
+#looking at top 5000 rows
+data %>% select(text,id) %>% head(5000)
+```
+
+2. Pre-processing
+As we observe from the text, there are many tweets which consist of irrelevant information: such as RT, the twitter handle, punctuation, stopwords (and, or the, etc) and numbers. These will add unnecessary noise to our dataset which we need to remove during the pre-processing stage.
+
+```{r message = FALSE, warning= FALSE}
+data$text <- sub("RT.*:", "", data$text) # Eliminate the Retweet
+data$text <- sub("@.* ", "", data$text) # Eliminate the @
+
+text_cleaning_tokens <- data %>% 
+  tidytext::unnest_tokens(word, text) # Convenient tokenization
+text_cleaning_tokens$word <- gsub('[[:digit:]]+', '', text_cleaning_tokens$word) #Digits
+text_cleaning_tokens$word <- gsub('[[:punct:]]+', '', text_cleaning_tokens$word) #Punct
+text_cleaning_tokens <- text_cleaning_tokens %>% filter(!(nchar(word) == 1))%>% #>1 let
+  anti_join(stop_words) # Stop words. Built in. Nice. 
+tokens <- text_cleaning_tokens %>% filter(!(word=="")) # No nothing
+tokens <- tokens %>% mutate(ind = row_number())
+tokens <- tokens %>% group_by(id) %>% mutate(ind = row_number()) %>%
+  tidyr::spread(key = ind, value = word)
+tokens [is.na(tokens)] <- ""
+tokens <- tidyr::unite(tokens, text,-id,sep =" " )
+tokens$text <- trimws(tokens$text)
+
+# Sentiment analysis evidently built in? 
+```
+
+3. Model Building 
+
+First you will have to create a DTM(document term matrix), which is a sparse matrix containing your terms and documents as dimensions. 
+
+When building the DTM, you can select how you want to tokenise(break up a sentence into 1 word or 2 words) your text. This will depend on how you want the LDA to read your words. You will need to ask yourself if singular words or bigram(phrases) makes sense in your context. For instance if your texts contain many words such as “failed executing” or “not appreciating”, then you will have to let the algorithm choose a window of maximum 2 words. Otherwise using a unigram will work just as fine. 
+
+In our case, because it’s Twitter sentiment, we will go with a window size of 1–2 words, and let the algorithm decide for us, which are the more important phrases to concatenate together. We will also explore the term frequency matrix, which shows the number of times the word/phrase is occurring in the entire corpus of text. If the term is < 2 times, we discard them, as it does not add any value to the algorithm, and it will help to reduce computation time as well.
+
+So here is a way to deal with the not good challenge
+
+```{r message = FALSE, warning= FALSE}
+# install.packages('textmineR')
+library(textmineR)
+#create DTM
+dtm <- CreateDtm(tokens$text, 
+                 doc_names = tokens$ID, 
+                 ngram_window = c(1, 2))
+#explore the basic frequency (Do not need to manually do TFIDF)
+tf <- TermDocFreq(dtm = dtm)
+original_tf <- tf %>% select(term, term_freq,doc_freq)
+rownames(original_tf) <- 1:nrow(original_tf)
+# Eliminate words appearing less than 2 times or in more than half of the
+# documents
+vocabulary <- tf$term[ tf$term_freq > 1 & tf$doc_freq < nrow(dtm) / 2 ]
+dtm = dtm
+```
+
+With your DTM, you run the LDA algorithm for topic modelling. 
+
+You will have to manually assign a number of topics k. Next, the algorithm will calculate a coherence score to allow us to choose the best topics from 1 to k. 
+
+What is coherence and coherence score? Coherence gives the probabilistic coherence of each topic. Coherence score is a score that calculates if the words in the same topic make sense when they are put together. This gives us the quality of the topics being produced. The higher the score for the specific number of k, it means for each topic, there will be more related words together and the topic will make more sense. For instance: {dog, talk, television, book} vs {dog, ball, bark, bone}. The latter will yield a higher coherence score than the former as the words are more closely related.
+
+In our example, we set k = 20 and run the LDA on it, and plot the coherence score. It’s up to the analyst to define how many topics they want.
+
+```{r message=FALSE, warning=FALSE}
+k_list <- seq(1, 20, by = 1)
+model_dir <- paste0("models_", digest::digest(vocabulary, algo = "sha1"))
+if (!dir.exists(model_dir)) dir.create(model_dir)
+model_list <- TmParallelApply(X = k_list, FUN = function(k){
+  filename = file.path(model_dir, paste0(k, "_topics.rda")) # This part seems to just be about saving
+  
+  if (!file.exists(filename)) {
+    m <- FitLdaModel(dtm = dtm, k = k, iterations = 500) # Different than what we've used previously
+    m$k <- k
+    m$coherence <- CalcProbCoherence(phi = m$phi, dtm = dtm, M = 5)
+    save(m, file = filename)
+  } else {
+    load(filename)
+  }
+  
+  m
+}, export=c("dtm", "model_dir")) # export only needed for Windows machines
+
+#model tuning
+#choosing the best model
+coherence_mat <- data.frame(k = sapply(model_list, function(x) nrow(x$phi)), 
+                            coherence = sapply(model_list, function(x) mean(x$coherence)), 
+                            stringsAsFactors = FALSE)
+# Plot (This is similar to what we did previously with harmonic mean)
+ggplot(coherence_mat, aes(x = k, y = coherence)) +
+  geom_point() +
+  geom_line(group = 1)+
+  ggtitle("Best Topic by Coherence Score") + theme_minimal() +
+  scale_x_continuous(breaks = seq(1,20,1)) + ylab("Coherence")
+
+# Remember that these models all apparently take forever!
+```
+
+Upon plotting of the k, we realise that k = 12 gives us the highest coherence score. In this case, even though the coherence score is rather low and there will definitely be a need to tune the model, such as increasing k to achieve better results or have more texts. But for explanation purpose, we will ignore the value and just go with the highest coherence score. 
+
+After understanding the optimal number of topics, we want to have a peek of the different words within the topic. 
+
+Each topic will have each word/phrase assigned a phi value (pr(word|topic)) — probability of word given a topic. So we only take into account the top 20 values per word in each topic. The top 20 terms will then describe what the topic is about.
+
+```{r message = FALSE, warning= FALSE}
+model <- model_list[which.max(coherence_mat$coherence)][[ 1 ]]
+model$top_terms <- GetTopTerms(phi = model$phi, M = 20)
+as.data.frame(model$top_terms)
+```
+
+The above picture shows the first 5 topics out of the 12 topics. The words are in ascending order of phi-value. 
+
+The higher the ranking, the more probable the word will belong to the topic. It seems like there are a couple of overlapping topics. It’s up to the analyst to think if we should combine the different topics together by eyeballing or we can run a Dendogram to see which topics should be grouped together. 
+
+A Dendogram uses Hellinger distance(distance between 2 probability vectors) to decide if the topics are closely related. For instance, the Dendogram below suggests that there are greater similarity between topic 10 and 11.
+
+```{r message = FALSE, warning= FALSE}
+model$topic_linguistic_dist <- CalcHellingerDist(model$phi)
+model$hclust <- hclust(as.dist(model$topic_linguistic_dist), "ward.D")
+model$hclust$labels <- paste(model$hclust$labels, model$labels[ , 1])
+plot(model$hclust)
+```
+
+4. Visualization 
+
+We can create word cloud to see the words belonging to the certain topic, based on the probability. Below represents topic 2. As ‘gopdebate’ is the most probable word in topic2, the size will be the largest in the word cloud.
+
+```{r message = FALSE, warning= FALSE}
+#visualising topics of words based on the max value of phi
+# Not sure where the allterms part came from, but this is simple enough
+set.seed(1234)
+final_summary_words <- data.frame(top_terms = t(model$top_terms))
+final_summary_words$topic <- rownames(final_summary_words)
+rownames(final_summary_words) <- 1:nrow(final_summary_words)
+final_summary_words <- final_summary_words %>% melt(id.vars = c("topic"))
+final_summary_words <- final_summary_words %>% rename(word = value) %>% select(-variable)
+final_summary_words <- left_join(final_summary_words,allterms)
+final_summary_words <- final_summary_words %>% group_by(topic,word) %>%
+  arrange(desc(value))
+final_summary_words <- final_summary_words %>% group_by(topic, word) %>% filter(row_number() == 1) %>% 
+  ungroup() %>% tidyr::separate(topic, into =c("t","topic")) %>% select(-t)
+word_topic_freq <- left_join(final_summary_words, original_tf, by = c("word" = "term"))
+pdf("cluster.pdf")
+for(i in 1:length(unique(final_summary_words$topic)))
+{  wordcloud(words = subset(final_summary_words ,topic == i)$word, freq = subset(final_summary_words ,topic == i)$value, min.freq = 1,
+             max.words=200, random.order=FALSE, rot.per=0.35, 
+             colors=brewer.pal(8, "Dark2"))}
+dev.off()
+```
+
+# Module 7: Topic Modeling
+## https://www.tidytextmining.com/topicmodeling.html
+
+We can use tidy text principles to approach topic modeling with the same set of tidy tools.
+
+LDA is a mathematical method for estimating both of these at the same time: finding the mixture of words that is associated with each topic, while also determining the mixture of topics that describes each document.
+
+```{r message = FALSE, warning= FALSE}
+library(topicmodels)
+
+data("AssociatedPress")
+AssociatedPress
+```
+
+We can use the LDA() function from the topicmodels package, setting k = 2, to create a two-topic LDA model.
+
+This function returns an object containing the full details of the model fit, such as how words are associated with topics and how topics are associated with documents.
+
+```{r message = FALSE, warning= FALSE}
+ap_lda <- LDA(AssociatedPress, k = 2, control = list(seed = 1234))
+ap_lda
+
+# Wow. Even with just 2, it takes a bit! I wonder, if it's my computer... 
+```
+
+Fitting the model was the “easy part”: the rest of the analysis will involve exploring and interpreting the model using tidying functions from the tidytext package.
+
+Word-topic probabilities
+
+The tidytext package provides this method for extracting the per-topic-per-word probabilities, called   β (“beta”), from the model.
+
+```{r message = FALSE, warning= FALSE}
+library(tidytext)
+
+ap_topics <- tidy(ap_lda, matrix = "beta")
+ap_topics
+
+```
+
+Notice that this has turned the model into a one-topic-per-term-per-row format. For each combination, the model computes the probability of that term being generated from that topic.
+
+We could use dplyr’s top_n() to find the 10 terms that are most common within each topic. As a tidy data frame, this lends itself well to a ggplot2 visualization.
+
+```{r message = FALSE, warning= FALSE}
+library(ggplot2)
+library(dplyr)
+
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>% # This is super convenient. 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+```
+The most common words in topic 1 include “percent”, “million”, “billion”, and “company”, which suggests it may represent business or financial news. Those most common in topic 2 include “president”, “government”, and “soviet”, suggesting that this topic represents political news.
+
+As an alternative, we could consider the terms that had the greatest difference in β between topic 1 and topic 2.
+
+To constrain it to a set of especially relevant words, we can filter for relatively common words, such as those that have a   β greater than 1/1000 in at least one topic.
+
+```{r message = FALSE, warning= FALSE}
+library(tidyr)
+
+beta_spread <- ap_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  spread(topic, beta) %>%
+  filter(topic1 > .001 | topic2 > .001) %>%
+  mutate(log_ratio = log2(topic2 / topic1))
+
+beta_spread
+```
+
+Besides estimating each topic as a mixture of words, LDA also models each document as a mixture of topics. We can examine the per-document-per-topic probabilities, called  
+γ
+  (“gamma”), with the matrix = "gamma" argument to tidy().
+  
+```{r message = FALSE, warning= FALSE}
+ap_documents <- tidy(ap_lda, matrix = "gamma")
+ap_documents
+
+# Conveniently built into lda
+```
+
+Each of these values is an estimated proportion of words from that document that are generated from that topic. For example, the model estimates that only about 24.8% of the words in document 1 were generated from topic 1.
+
+We can see that many of these documents were drawn from a mix of the two topics, but that document 6 was drawn almost entirely from topic 2, having a  
+γ from topic 1 close to zero. To check this answer, we could tidy() the document-term matrix (see Chapter 5.1) and check what the most common words in that document were
+  
+```{r message = FALSE, warning= FALSE}
+tidy(AssociatedPress) %>%
+  filter(document == 6) %>%
+  arrange(desc(count))
+```  
+
+Example: The Great Library Heist
+
+Suppose a vandal has broken into your study and torn apart four of your books:
+
+Great Expectations by Charles Dickens
+The War of the Worlds by H.G. Wells
+Twenty Thousand Leagues Under the Sea by Jules Verne
+Pride and Prejudice by Jane Austen
+
+This vandal has torn the books into individual chapters, and left them in one large pile. How can we restore these disorganized chapters to their original books? This is a challenging problem since the individual chapters are unlabeled: we don’t know what words might distinguish them into groups. We’ll thus use topic modeling to discover how chapters cluster into distinct topics, each of them (presumably) representing one of the books.
+
+```{r message = FALSE, warning= FALSE}
+titles <- c("Twenty Thousand Leagues under the Sea", "The War of the Worlds",
+            "Pride and Prejudice", "Great Expectations")
+``` 
+
+```{r message = FALSE, warning= FALSE}
+# install.packages('gutenbergr')
+library(gutenbergr)
+
+books <- gutenberg_works(title %in% titles) %>%
+  gutenberg_download(meta_fields = "title")
+``` 
+
+As pre-processing, we divide these into chapters, use tidytext’s unnest_tokens() to separate them into words, then remove stop_words.
+
+We’re treating every chapter as a separate “document”, each with a name like Great Expectations_1 or Pride and Prejudice_11. (In other applications, each document might be one newspaper article, or one blog post).
+
+```{r message = FALSE, warning= FALSE}
+library(stringr)
+
+# divide into documents, each representing one chapter
+by_chapter <- books %>%
+  group_by(title) %>%
+  mutate(chapter = cumsum(str_detect(text, regex("^chapter ", ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  filter(chapter > 0) %>%
+  unite(document, title, chapter)
+
+# Mutate basically used to create new variables 
+
+# split into words
+by_chapter_word <- by_chapter %>%
+  unnest_tokens(word, text)
+
+# find document-word counts
+word_counts <- by_chapter_word %>%
+  anti_join(stop_words) %>%
+  count(document, word, sort = TRUE) %>%
+  ungroup()
+
+word_counts
+``` 
+
+LDA on Chapters 
+
+Right now our data frame word_counts is in a tidy form, with one-term-per-document-per-row, but the topicmodels package requires a DocumentTermMatrix. As described in Chapter 5.2, we can cast a one-token-per-row table into a DocumentTermMatrix with tidytext’s cast_dtm().
+
+```{r message = FALSE, warning= FALSE}
+chapters_dtm <- word_counts %>%
+  cast_dtm(document, word, n)
+
+chapters_dtm
+``` 
+
+We can then use the LDA() function to create a four-topic model. In this case we know we’re looking for four topics because there are four books; in other problems we may need to try a few different values of k.
+
+```{r message = FALSE, warning= FALSE}
+chapters_lda <- LDA(chapters_dtm, k = 4, control = list(seed = 1234))
+# Remember this unique seed thing based on the k!
+chapters_lda
+``` 
+
+Much as we did on the Associated Press data, we can examine per-topic-per-word probabilities.
+
+```{r message = FALSE, warning= FALSE}
+chapter_topics <- tidy(chapters_lda, matrix = "beta")
+chapter_topics
+``` 
+
+For each combination, the model computes the probability of that term being generated from that topic. For example, the term “joe” has an almost zero probability of being generated from topics 1, 2, or 3, but it makes up 1.45% of topic 4. (BETA)
+
+We could use dplyr’s top_n() to find the top 5 terms within each topic.
+
+```{r message = FALSE, warning= FALSE}
+top_terms <- chapter_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms
+``` 
+
+This tidy output lends itself well to a ggplot2 visualization (Figure 6.4).
+
+```{r message = FALSE, warning= FALSE}
+library(ggplot2)
+
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+```
+
+These topics are pretty clearly associated with the four books! There’s no question that the topic of “captain”, “nautilus”, “sea”, and “nemo” belongs to Twenty Thousand Leagues Under the Sea, and that “jane”, “darcy”, and “elizabeth” belongs to Pride and Prejudice. We see “pip” and “joe” from Great Expectations and “martians”, “black”, and “night” from The War of the Worlds.
+
+Per-document classification 
+
+Each document in this analysis represented a single chapter. Thus, we may want to know which topics are associated with each document. Can we put the chapters back together in the correct books? We can find this by examining the per-document-per-topic probabilities,  
+γ
+  (“gamma”).
+  
+```{r message = FALSE, warning= FALSE}
+chapters_gamma <- tidy(chapters_lda, matrix = "gamma")
+chapters_gamma
+```
+
+Each of these values is an estimated proportion of words from that document that are generated from that topic. For example, the model estimates that each word in the Great Expectations_57 document has only a 0.00135% probability of coming from topic 1 (Pride and Prejudice).
+
+Now that we have these topic probabilities, we can see how well our unsupervised learning did at distinguishing the four books. We’d expect that chapters within a book would be found to be mostly (or entirely), generated from the corresponding topic.
+
+First we re-separate the document name into title and chapter, after which we can visualize the per-document-per-topic probability for each (Figure 6.5).
+
+```{r message = FALSE, warning= FALSE}
+chapters_gamma <- chapters_gamma %>%
+  separate(document, c("title", "chapter"), sep = "_", convert = TRUE)
+
+chapters_gamma
+```
+
+```{r message = FALSE, warning= FALSE}
+# reorder titles in order of topic 1, topic 2, etc before plotting
+chapters_gamma %>%
+  mutate(title = reorder(title, gamma * topic)) %>%
+  ggplot(aes(factor(topic), gamma)) +
+  geom_boxplot() +
+  facet_wrap(~ title)
+```
+
+We notice that almost all of the chapters from Pride and Prejudice, War of the Worlds, and Twenty Thousand Leagues Under the Sea were uniquely identified as a single topic each.
+
+It does look like some chapters from Great Expectations (which should be topic 4) were somewhat associated with other topics. Are there any cases where the topic most associated with a chapter belonged to another book? First we’d find the topic that was most associated with each chapter using top_n(), which is effectively the “classification” of that chapter.
+
+```{r message = FALSE, warning= FALSE}
+chapter_classifications <- chapters_gamma %>%
+  group_by(title, chapter) %>%
+  top_n(1, gamma) %>%
+  ungroup()
+
+chapter_classifications
+```
+
+We can then compare each to the “consensus” topic for each book (the most common topic among its chapters), and see which were most often misidentified.
+
+```{r message = FALSE, warning= FALSE}
+book_topics <- chapter_classifications %>%
+  count(title, topic) %>%
+  group_by(title) %>%
+  top_n(1, n) %>%
+  ungroup() %>%
+  transmute(consensus = title, topic)
+
+chapter_classifications %>%
+  inner_join(book_topics, by = "topic") %>%
+  filter(title != consensus)
+```
+
+We see that only two chapters from Great Expectations were misclassified, as LDA described one as coming from the “Pride and Prejudice” topic (topic 1) and one from The War of the Worlds (topic 3). That’s not bad for unsupervised clustering!
+
+One step of the LDA algorithm is assigning each word in each document to a topic. The more words in a document are assigned to that topic, generally, the more weight (gamma) will go on that document-topic classification.
+
+We may want to take the original document-word pairs and find which words in each document were assigned to which topic. This is the job of the augment() function, which also originated in the broom package as a way of tidying model output. While tidy() retrieves the statistical components of the model, augment() uses a model to add information to each observation in the original data.
+
+```{r message = FALSE, warning= FALSE}
+assignments <- augment(chapters_lda, data = chapters_dtm)
+assignments
+```
+
+This returns a tidy data frame of book-term counts, but adds an extra column: .topic, with the topic each term was assigned to within each document. (Extra columns added by augment always start with ., to prevent overwriting existing columns). We can combine this assignments table with the consensus book titles to find which words were incorrectly classified.
+
+```{r message = FALSE, warning= FALSE}
+assignments <- assignments %>%
+  separate(document, c("title", "chapter"), sep = "_", convert = TRUE) %>%
+  inner_join(book_topics, by = c(".topic" = "topic"))
+
+assignments
+```
+
+This combination of the true book (title) and the book assigned to it (consensus) is useful for further exploration. We can, for example, visualize a confusion matrix, showing how often words from one book were assigned to another, using dplyr’s count() and ggplot2’s geom_tile (Figure 6.6.
+
+```{r message = FALSE, warning= FALSE}
+# install.packages('scales')
+library(scales)
+assignments %>%
+  count(title, consensus, wt = count) %>%
+  group_by(title) %>%
+  mutate(percent = n / sum(n)) %>%
+  ggplot(aes(consensus, title, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient2(high = "red", label = percent_format()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        panel.grid = element_blank()) +
+  labs(x = "Book words were assigned to",
+       y = "Book words came from",
+       fill = "% of assignments")
+```
+
+We notice that almost all the words for Pride and Prejudice, Twenty Thousand Leagues Under the Sea, and War of the Worlds were correctly assigned, while Great Expectations had a fair number of misassigned words (which, as we saw above, led to two chapters getting misclassified).
+
+What were the most commonly mistaken words?
+
+```{r message = FALSE, warning= FALSE}
+wrong_words <- assignments %>%
+  filter(title != consensus)
+
+wrong_words
+```
+
+```{r message = FALSE, warning= FALSE}
+wrong_words %>%
+  count(title, consensus, term, wt = count) %>%
+  ungroup() %>%
+  arrange(desc(n))
+```
+
+We can see that a number of words were often assigned to the Pride and Prejudice or War of the Worlds cluster even when they appeared in Great Expectations. For some of these words, such as “love” and “lady”, that’s because they’re more common in Pride and Prejudice (we could confirm that by examining the counts).
+
+On the other hand, there are a few wrongly classified words that never appeared in the novel they were misassigned to. For example, we can confirm “flopson” appears only in Great Expectations, even though it’s assigned to the “Pride and Prejudice” cluster.
+
+```{r message = FALSE, warning= FALSE}
+word_counts %>%
+  filter(word == "flopson")
+```
+
+The LDA algorithm is stochastic, and it can accidentally land on a topic that spans multiple books
+
+The LDA() function in the topicmodels package is only one implementation of the latent Dirichlet allocation algorithm. For example, the mallet package (Mimno 2013) implements a wrapper around the MALLET Java package for text classification tools, and the tidytext package provides tidiers for this model output as well. (MALLET USED IN PYTHON MORE)
+
+# Look here if you wan to see how mallet works in R: https://www.tidytextmining.com/topicmodeling.html#by-word-assignments-augment
