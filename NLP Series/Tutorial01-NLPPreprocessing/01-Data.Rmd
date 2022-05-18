@@ -1,0 +1,50 @@
+# Data
+
+## History of data
+
+As per the [Kaggle repo](https://www.kaggle.com/crowdflower/twitter-airline-sentiment), this data is described as *A sentiment analysis job about the problems of each major U.S. airline. Twitter data was scraped from February of 2015 and contributors were asked to first classify positive, negative, and neutral tweets, followed by categorizing negative reasons (such as "late flight" or "rude service").*
+
+## Load Data
+
+You can find the data online at [https://raw.githubusercontent.com/kolaveridi/kaggle-Twitter-US-Airline-Sentiment-/master/Tweets.csv](https://raw.githubusercontent.com/kolaveridi/kaggle-Twitter-US-Airline-Sentiment-/master/Tweets.csv)
+
+```{r, message=F, warning=F}
+data_url <- "https://raw.githubusercontent.com/kolaveridi/kaggle-Twitter-US-Airline-Sentiment-/master/Tweets.csv"
+tweets <- readr::read_csv(data_url)
+```
+
+Alternatively, if the data is not available, we made a trimmed down version of the data available in this tutorial folder.    
+
+```{r, eval = F}
+tweets <- readr::read_csv('us_airlines_tweets.csv')
+```
+
+
+## Quick Look
+
+```{r}
+dim(tweets)
+```
+
+```{r}
+names(tweets)
+```
+
+```{r, eval = F}
+table(tweets$airline_sentiment, tweets$airline)
+```
+
+```{r, echo = F}
+knitr::kable(table(tweets$airline_sentiment, tweets$airline))
+```
+
+```{r, eval = F}
+set.seed(4321) #consistent random numbers
+sample(tweets$text, 5)
+```
+
+```{r, echo = F}
+set.seed(4321) #consistent random numbers
+knitr::kable(sample(tweets$text, 5))
+```
+

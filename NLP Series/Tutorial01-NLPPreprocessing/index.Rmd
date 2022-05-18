@@ -1,0 +1,60 @@
+---
+title: "NLP Tutorial 01: Preprocessing"
+author: "Ben Ortiz"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+documentclass: book
+description: "The purpose of this book is to provide R code supplementing the NLP tutorial covering *preprocessing*."
+output:
+  bookdown::gitbook: default
+---
+
+# Intro
+
+*The purpose of this book is to provide R code supplementing the NLP tutorial covering *preprocessing*
+
+## Prerequisites 
+
+The following packages are necessary to follow the material in this book.
+
+```{r, eval=F}
+install.packages(c(
+  'dplyr', #utilities for data cleaning
+  'fastNaiveBayes', #NB implementation
+  'gmodels', #display results of model
+  'magrittr', #allow piping
+  'Matrix', #create sparse matrices
+  'MLmetrics', #get F1 score
+  'readr', #read in data
+  'stringr', #utilities for string manipulation
+  'tidytext', #TIDY version of text mining
+  'tm' #text mining
+))
+```
+
+## Package usage
+
+We will explicitly refer to packages when we use a function. This takes the form of `package::function()`. The reason we do this is to be clear where functions are coming from.
+
+The only exception to this is **magrittr**'s `%>%` (pipe) function. This is to allow some of our code to be more legible  
+
+```{r}
+library(magrittr)
+```
+
+If you haven't used `%>% before, then think of it as using the output of a previous function as the input of the next function.
+
+That is rather than nesting functions:
+
+```{r}
+sqrt(sum(log(c(1, 10, 100))))
+```
+
+We can focus on functions in the order they are called
+
+```{r}
+c(1,10,100) %>%
+  log() %>%
+  sum() %>%
+  sqrt()
+```

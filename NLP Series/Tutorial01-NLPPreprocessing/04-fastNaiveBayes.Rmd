@@ -1,0 +1,90 @@
+# fastNaiveBayes: a Naive Package
+
+## Training & Test Sets 
+
+Regardless of which route you took [tm or tidytext] you should have a sparse matrix available to model with. We will need to separate these matrices into **training** and **testing** sets.
+
+Let's first determine how large our training set will be. 
+
+```{r}
+perc_train <- .75
+```
+
+### tm sets
+
+Let us get a random sample of rows to use for training
+
+```{r}
+set.seed(4321) 
+tm_train <- sample(1:nrow(tm_sparse), perc_train * nrow(tm_sparse))
+```
+
+Now let's grab the associated rows in the sparse matrix and the associated sentiments.
+
+```{r}
+tm_sparse_train <- tm_sparse[tm_train, ]
+tm_y_train <- tm_y[tm_train]
+
+tm_sparse_test <- tm_sparse[-tm_train, ]
+tm_y_test <- tm_y[-tm_train]
+```
+
+### tidy sets
+
+Let us get a random sample of rows to use for training
+
+```{r}
+set.seed(4321) 
+tidy_train <- sample(col, perc_train * nrow(tidy_sparse))
+```
+
+Now let's grab the associated rows in the sparse matrix and the associated sentiments.
+
+```{r}
+tidy_sparse_train <- tidy_sparse[tidy_train, ]
+tidy_y_train <- tidy_y[tidy_train]
+
+tidy_sparse_test <- tidy_sparse[-tidy_train, ]
+tidy_y_test <- tidy_y[-tidy_train]
+```
+
+
+## NaiveBayes
+
+### tm
+
+```{r}
+tm_nb <- fastNaiveBayes::fastNaiveBayes(tm_sparse_train, tm_y_train)
+
+tm_pred <- predict(tm_nb, tm_sparse_test)
+
+gmodels::CrossTable(tm_pred, tm_y_test,
+                    prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+                    dnn = c('predicted', 'actual'))
+```
+
+Let's get he F1 score.
+
+```{r}
+tm_f1 <- MLmetrics::F1_Score(tm_y_test, tm_pred)
+tm_f1
+```
+
+### tidy
+
+```{r}
+tidy_nb <- fastNaiveBayes::fastNaiveBayes(tidy_sparse_train, tidy_y_train)
+
+tidy_pred <- predict(tidy_nb, tidy_sparse_test)
+
+gmodels::CrossTable(tidy_pred, tidy_y_test,
+                    prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+                    dnn = c('predicted', 'actual'))
+```
+
+Let's get he F1 score.
+
+```{r}
+tidy_f1 <- MLmetrics::F1_Score(tidy_y_test, tidy_pred )
+tidy_f1
+```

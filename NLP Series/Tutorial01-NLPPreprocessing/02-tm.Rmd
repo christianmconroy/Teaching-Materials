@@ -1,0 +1,120 @@
+# tm: Traditional Text Preprocessing
+
+## Columns of importance
+
+  ```{r}
+  tweets_clean <- dplyr::select(tweets, text, airline_sentiment)
+  ```
+
+## Create a corpus
+
+```{r}
+tweet_corpus <- tweets_clean$text %>%
+  tm::VectorSource() %>%  
+  tm::Corpus() 
+```
+
+```{r}
+tweet_corpus
+```
+
+A **Corpus** is simply a vector of documents that includes additional metadata.
+
+```{r}
+tm::inspect(tweet_corpus[1:6])
+```
+
+## Clean Corpus
+
+There are a number of steps you can use to clean a corpus for text mining purposes. **tm** provides some helper functions to accomplish this.
+
+**tm::tm_map** iterates over all the documents in a corpus and performs a function. It accepts two parameters: a corpus and a function to iterate with. The returned value is another corpus. This is a perfect candidate for piping.
+
+```{r, message=F,warning=F}
+corpus_clean <- tweet_corpus %>%
+  tm::tm_map(tolower) %>%
+  tm::tm_map(tm::removeNumbers) %>%
+  tm::tm_map(tm::removeWords, tm::stopwords()) %>%
+  tm::tm_map(tm::removePunctuation) %>%
+  tm::tm_map(tm::stripWhitespace)
+```
+
+```{r}
+tm::inspect(corpus_clean[1:6])
+```
+
+You can even create your own function if you think it will help. Let's do one that removes the names of the airlines.
+
+```{r}
+airlines <- c("virginamerica", 
+              "jetblue", 
+              "americanair", 
+              "united", 
+              "usairways", 
+              "soutwestair") %>%
+  paste0(collapse = '|') #creates a regex to remove any airline from text
+
+rmAirlines <- function(txt){
+  stringr::str_remove_all(txt, airlines) %>%
+    tm::stripWhitespace()
+}
+
+```
+
+```{r, warning=F}
+corpus_clean <- corpus_clean %>%
+  tm::tm_map(rmAirlines)
+
+tm::inspect(corpus_clean[1:6])
+```
+
+## Create **Document-Term Matrix**
+
+Before we perform any models, we need to create a **Document Term Matrix**
+
+```{r}
+tm_dtm <- tm::DocumentTermMatrix(corpus_clean)
+```
+
+```{r}
+tm_dtm
+```
+You may notice that there are `r ncol(tm_dtm)` terms in the DTM, they might not all be important. We might want to remove terms that only show up in very few documents.
+
+```{r}
+tm_dict <- tm::findFreqTerms(tm_dtm, 5)
+```
+
+**tm_dict** contains terms that appear in at least 5 documents. Let's create anew DTM that only includes these terms.
+
+```{r}
+tm_dtm_trimmed <- tm::DocumentTermMatrix(corpus_clean,list(dictionary = tm_dict))
+ 
+tm_dtm_trimmed
+```
+
+Now we have a smaller document term matrix with only `r ncol(tm_dtm_trimmed)` with the same number of rows [documents]. This step is less important for performance as it is for compute power.
+
+And, to aid us in the modeling portion, it will be important to convert the DTM into a sparse matrix. Sparse matrices are much more space efficient and can be processed quicker.
+
+```{r}
+tm_sparse <- tm_dtm_trimmed %>% 
+  as.matrix() %>%
+  Matrix::Matrix(sparse = T)
+```
+
+```{r}
+tm_sparse[1:6, 1:6]
+```
+
+Before we move onto the next section, it's important that we ensure that the sparse matrix is in line with our original data. We can do this by comparing the number of rows in the matrix with the number of sentiments available to us in the original data.
+
+```{r}
+nrow(tm_sparse) == length(tweets_clean$airline_sentiment)
+```
+
+Since they match we can store the sentiments for training purposes in a vector.
+
+```{r}
+tm_y <- tweets_clean$airline_sentiment
+```
